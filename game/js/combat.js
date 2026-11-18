@@ -1,139 +1,120 @@
-// combat.js — on-foot punch, pistol/SMG hitscan shooting, enemy shooters for
-// the Mission 5 shootout, and tracers that show where shots went.
+// Port Solano — on-foot combat: fists, pistol and SMG hitscan shooting,
+// reload, muzzle flashes, tracers and damage to peds, cops and traffic.
 import * as THREE from 'three';
+import { WEAPONS } from './state.js';
+import { clamp } from './util.js';
 
 export function createCombat(scene) {
-  return { enemies: [], tracers: [], punchCd: 0, shootCd: 0 };
+  const tracerMat = new THREE.MeshBasicMaterial({ color: 0xffe94a });
+  const tracerGeo = new THREE.BoxGeometry(0.06, 0.06, 1);
+  const tracers = [];
+  const flash = new THREE.PointLight(0xffe94a, 0, 18);
+  scene.add(flash);
+  return { tracers, tracerMat, tracerGeo, flash, flashT: 0 };
 }
 
-function makeEnemyMesh() {
-  const g = new THREE.Group();
-  const jacket = new THREE.MeshLambertMaterial({ color: 0x3a1a1a });
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.75, 4, 8), jacket);
-  body.position.y = 1.05; g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), new THREE.MeshLambertMaterial({ color: 0xd9a06a }));
-  head.position.y = 1.9; g.add(head);
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.55), new THREE.MeshLambertMaterial({ color: 0x14161a }));
-  gun.position.set(0.3, 1.3, 0.4); g.add(gun);
-  return g;
+export function currentWeapon(state) {
+  return WEAPONS[state.weaponIndex];
 }
 
-export function spawnEnemies(scene, combat, center, count, rng) {
-  combat.enemies = [];
-  for (let i = 0; i < count; i++) {
-    const mesh = makeEnemyMesh();
-    const ang = rng() * Math.PI * 2, r = 14 + rng() * 16;
-    mesh.position.set(center.x + Math.sin(ang) * r, 0, center.z + Math.cos(ang) * r);
-    scene.add(mesh);
-    combat.enemies.push({ mesh, pos: mesh.position, hp: 30, shootCd: 1 + rng() * 2, speed: 2.6 });
+// Fire the current weapon. Returns a hit description or null.
+export function fireWeapon(state, combat, scene, targets, audio) {
+  const w = currentWeapon(state);
+  const now = state.time;
+  if (state.lastShot && now - state.lastShot < w.rate) return null;
+  if (w.id !== 'fists') {
+    if (state.magAmmo[state.weaponIndex] <= 0) { audio.blip(220, 0.08, 'square', 0.06); return { empty: true }; }
+    state.magAmmo[state.weaponIndex]--;
   }
-}
-
-export function clearEnemies(scene, combat) {
-  for (const e of combat.enemies) scene.remove(e.mesh);
-  combat.enemies = [];
-}
-
-function addTracer(scene, combat, from, to) {
-  const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
-  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffe27a, transparent: true, opacity: 0.9 }));
-  scene.add(line);
-  combat.tracers.push({ line, life: 0.12 });
-}
-
-// Player punch: hits the nearest enemy/ped within 2.2m in front.
-export function playerPunch(ctx) {
-  const { combat, player, state, audio } = ctx;
-  if (combat.punchCd > 0) return;
-  combat.punchCd = 0.45;
-  audio.punch();
-  const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
-  let best = null, bestD = 2.4;
-  for (const e of combat.enemies) {
-    const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
+  state.lastShot = now;
+  state.stats.shotsFired++;
+  audio.shoot(w.id);
+  combat.flashT = 0.06;
+  const px = state.player.x, pz = state.player.z;
+  const dir = state.player.heading;
+  // Muzzle flash at the player's hand.
+  combat.flash.position.set(px + Math.sin(dir) * 1, 1.4, pz + Math.cos(dir) * 1);
+  combat.flash.intensity = 6;
+  if (w.id === 'fists') {
+    audio.punch();
+    for (const t of targets) {
+      if (t.down) continue;
+      const d = Math.hypot(t.x - px, t.z - pz);
+      if (d < w.range) { damageTarget(t, w.damage); return { hit: t, damage: w.damage }; }
+    }
+    return { miss: true };
+  }
+  // Hitscan: nearest target inside a narrow cone in front of the player.
+  let best = null, bestD = w.range;
+  for (const t of targets) {
+    if (t.down) continue;
+    const dx = t.x - px, dz = t.z - pz;
     const d = Math.hypot(dx, dz);
-    if (d < bestD && dx * fx + dz * fz > 0) { best = e; bestD = d; }
+    if (d > w.range) continue;
+    const ang = Math.atan2(dx, dz);
+    let diff = ang - dir;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    if (Math.abs(diff) < 0.14 && d < bestD) { best = t; bestD = d; }
   }
+  // Tracer line from the player toward the aim point.
+  const endD = best ? bestD : w.range;
+  const tracer = new THREE.Mesh(combat.tracerGeo, combat.tracerMat);
+  tracer.position.set(px + Math.sin(dir) * endD / 2, 1.35, pz + Math.cos(dir) * endD / 2);
+  tracer.rotation.y = dir;
+  tracer.scale.z = endD;
+  scene.add(tracer);
+  combat.tracers.push({ mesh: tracer, t: 0.09 });
   if (best) {
-    best.hp -= 20;
-    ctx.addFeed('You landed a punch!');
-    if (best.hp <= 0) {
-      ctx.scene.remove(best.mesh);
-      combat.enemies = combat.enemies.filter(e => e !== best);
-      state.cash += 25; ctx.addFeed('Enemy down — +$25');
-      audio.cash();
+    damageTarget(best, w.damage);
+    if (best.isCopCar) state.wanted = Math.min(5, state.wanted + 1);
+    return { hit: best, damage: w.damage };
+  }
+  return { miss: true };
+}
+
+function damageTarget(t, dmg) {
+  t.hp = (t.hp ?? 100) - dmg;
+  if (t.hp <= 0) {
+    t.down = true;
+    if (t.mesh) t.mesh.visible = false;
+  }
+}
+
+export function reloadWeapon(state, audio) {
+  const w = currentWeapon(state);
+  if (w.id === 'fists') return;
+  const need = w.mag - state.magAmmo[state.weaponIndex];
+  if (need <= 0 || state.reserveAmmo[state.weaponIndex] <= 0) return;
+  const take = Math.min(need, state.reserveAmmo[state.weaponIndex]);
+  state.magAmmo[state.weaponIndex] += take;
+  state.reserveAmmo[state.weaponIndex] -= take;
+  audio.reload();
+}
+
+export function updateCombatVisuals(combat, dt) {
+  if (combat.flashT > 0) {
+    combat.flashT -= dt;
+    if (combat.flashT <= 0) combat.flash.intensity = 0;
+  }
+  for (let i = combat.tracers.length - 1; i >= 0; i--) {
+    const tr = combat.tracers[i];
+    tr.t -= dt;
+    if (tr.t <= 0) {
+      tr.mesh.parent?.remove(tr.mesh);
+      combat.tracers.splice(i, 1);
     }
   }
 }
 
-// Player shoot: hitscan toward the camera-forward direction on the ground plane.
-export function playerShoot(ctx, targetPoint) {
-  const { combat, player, state, audio, scene } = ctx;
-  if (state.weapon === 'fists') { playerPunch(ctx); return; }
-  if (combat.shootCd > 0 || state.ammo <= 0) return;
-  combat.shootCd = state.weapon === 'smg' ? 0.11 : 0.3;
-  state.ammo -= 1;
-  audio.gunshot();
-  const from = new THREE.Vector3(player.pos.x, 1.4, player.pos.z);
-  const dir = new THREE.Vector3(targetPoint.x - from.x, 0, targetPoint.z - from.z).normalize();
-  const to = from.clone().add(dir.clone().multiplyScalar(42));
-  // hit the first enemy within 1.2m of the shot line
-  let best = null, bestT = 42;
-  for (const e of combat.enemies) {
-    const ex = e.pos.x - from.x, ez = e.pos.z - from.z;
-    const t = ex * dir.x + ez * dir.z;
-    if (t > 0 && t < bestT) {
-      const px = from.x + dir.x * t, pz = from.z + dir.z * t;
-      if (Math.hypot(e.pos.x - px, e.pos.z - pz) < 1.4) { best = e; bestT = t; }
-    }
+// Player takes damage: armor absorbs first, then health.
+export function hurtPlayer(state, dmg, audio) {
+  let left = dmg;
+  if (state.armor > 0) {
+    const absorbed = Math.min(state.armor, left);
+    state.armor -= absorbed;
+    left -= absorbed;
   }
-  if (best) {
-    best.hp -= state.weapon === 'smg' ? 18 : 34;
-    to.copy(new THREE.Vector3(best.pos.x, 1.2, best.pos.z));
-    if (best.hp <= 0) {
-      scene.remove(best.mesh);
-      combat.enemies = combat.enemies.filter(e => e !== best);
-      state.cash += 50; ctx.addFeed('Enemy down — +$50'); audio.cash();
-      ctx.onEnemyDown?.();
-    }
-  } else {
-    // shooting a cop or a bystander raises heat
-    if (state.wanted < 5 && Math.random() < 0.3) ctx.raiseWanted(1, 'fired a shot in public');
-  }
-  addTracer(scene, combat, from, to);
-  // muzzle flash light
-  const flash = new THREE.PointLight(0xffe27a, 12, 9);
-  flash.position.copy(from); scene.add(flash);
-  setTimeout(() => scene.remove(flash), 60);
-}
-
-export function updateCombat(ctx, dt) {
-  const { combat, player, state, audio, scene } = ctx;
-  combat.punchCd = Math.max(0, combat.punchCd - dt);
-  combat.shootCd = Math.max(0, combat.shootCd - dt);
-  for (const t of combat.tracers) t.life -= dt;
-  combat.tracers = combat.tracers.filter(t => {
-    if (t.life <= 0) { scene.remove(t.line); return false; }
-    return true;
-  });
-  // enemies advance on the player and shoot back
-  for (const e of combat.enemies) {
-    const dx = player.pos.x - e.pos.x, dz = player.pos.z - e.pos.z;
-    const dist = Math.hypot(dx, dz);
-    e.mesh.rotation.y = Math.atan2(dx, dz);
-    if (dist > 6) {
-      e.pos.x += Math.sin(e.mesh.rotation.y) * e.speed * dt;
-      e.pos.z += Math.cos(e.mesh.rotation.y) * e.speed * dt;
-    }
-    e.shootCd -= dt;
-    if (e.shootCd <= 0 && dist < 30) {
-      e.shootCd = 2.2 + Math.random();
-      addTracer(scene, combat, new THREE.Vector3(e.pos.x, 1.4, e.pos.z),
-        new THREE.Vector3(player.pos.x, 1.2, player.pos.z));
-      audio.gunshot();
-      if (Math.random() < 0.45) ctx.damagePlayer(5, 'shot');
-    }
-    // enemy reaches the player on foot: melee damage
-    if (dist < 1.8 && !player.inCar) { ctx.damagePlayer(8 * dt, 'beaten'); }
-  }
+  state.health = Math.max(0, state.health - left);
+  if (state.health <= 0) state.mode = 'wasted';
 }

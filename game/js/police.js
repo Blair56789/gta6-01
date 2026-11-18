@@ -1,155 +1,145 @@
-// police.js — wanted level, police car pursuit, foot cops, 5-star roadblocks,
-// and the "lose the heat" timer (break line of sight, then hide or bribe).
+// Port Solano — Solano PD: patrol cars that chase and ram, foot cops at low
+// wanted levels, and roadblocks once the heat hits 4 stars.
 import * as THREE from 'three';
-import { createCar } from './vehicles.js';
-import { BOUND } from './city.js';
+import { newCar, CAR_MODELS } from './vehicles.js';
+import { clamp } from './util.js';
 
-const POLICE_MODEL = { name: 'Solano PD Interceptor', color: 0x1a1d22, top: 24, grip: 1.1 };
+const POLICE_MODEL = { name: 'PD Interceptor', color: 0x14181f, top: 30, accel: 18 };
 
-export function createPolice(scene) {
-  return { cars: [], foot: [], hiddenTimer: 0, roadblocks: [], spawnCooldown: 0 };
+export function spawnPolice(scene, count) {
+  const cops = [];
+  for (let i = 0; i < count; i++) {
+    const car = newCar(scene, POLICE_MODEL, 0, 0, 0, 'police');
+    car.isCop = true;
+    car.active = false;
+    car.mesh.visible = false;
+    cops.push(car);
+  }
+  return cops;
 }
 
-function spawnPoliceCar(scene, police, near, rng) {
-  const ang = rng() * Math.PI * 2;
-  const x = THREE.MathUtils.clamp(near.x + Math.sin(ang) * 55, -BOUND, BOUND);
-  const z = THREE.MathUtils.clamp(near.z + Math.cos(ang) * 55, -BOUND, BOUND);
-  const car = createCar(scene, POLICE_MODEL, x, z, Math.atan2(near.x - x, near.z - z), { isPolice: true });
-  car.speed = 12;
-  police.cars.push(car);
-  return car;
+function placeCopNear(cop, px, pz, rng) {
+  const a = rng() * Math.PI * 2;
+  const d = 45 + rng() * 25;
+  cop.x = clamp(px + Math.sin(a) * d, -195, 195);
+  cop.z = clamp(pz + Math.cos(a) * d, -195, 195);
+  cop.speed = 8;
+  cop.mesh.visible = true;
+  cop.active = true;
 }
 
-function spawnFootCop(scene, police, near, rng) {
-  const g = new THREE.Group();
-  const uni = new THREE.MeshLambertMaterial({ color: 0x1a2a4a });
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.75, 4, 8), uni);
-  body.position.y = 1.05; g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), new THREE.MeshLambertMaterial({ color: 0xe8b88a }));
-  head.position.y = 1.9; g.add(head);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.12, 10), new THREE.MeshLambertMaterial({ color: 0x0e1a33 }));
-  cap.position.y = 2.08; g.add(cap);
-  const ang = rng() * Math.PI * 2;
-  g.position.set(THREE.MathUtils.clamp(near.x + Math.sin(ang) * 18, -BOUND, BOUND), 0,
-    THREE.MathUtils.clamp(near.z + Math.cos(ang) * 18, -BOUND, BOUND));
-  scene.add(g);
-  const cop = { mesh: g, pos: g.position, heading: 0, speed: 3.4, shootCd: 2 + rng() * 2 };
-  police.foot.push(cop);
-  return cop;
-}
-
-export function wantedTargetCount(wanted) {
-  return wanted <= 0 ? 0 : wanted === 1 ? 1 : wanted === 2 ? 2 : wanted === 3 ? 3 : wanted === 4 ? 4 : 5;
-}
-
-export function updatePolice(ctx, dt, rng) {
-  const { scene, state, police, player, audio } = ctx;
+export function updatePolice(cops, dt, state, rng, city) {
   const wanted = state.wanted;
-  police.spawnCooldown -= dt;
-
-  // --- spawn to match wanted level ---
-  const want = wantedTargetCount(wanted);
-  if (police.cars.length < want && police.spawnCooldown <= 0) {
-    spawnPoliceCar(scene, police, player.pos, rng);
-    police.spawnCooldown = 4;
-    if (wanted >= 3 && police.foot.length < 2) spawnFootCop(scene, police, player.pos, rng);
+  const px = state.inCar && state.car ? state.car.x : state.player.x;
+  const pz = state.inCar && state.car ? state.car.z : state.player.z;
+  const playerSpeed = state.inCar && state.car ? Math.abs(state.car.speed) : 0;
+  const wantCount = wanted === 0 ? 0 : wanted <= 1 ? 1 : wanted === 2 ? 2 : wanted === 3 ? 3 : wanted === 4 ? 4 : 5;
+  let active = 0;
+  for (const cop of cops) if (cop.active) active++;
+  // Spawn more cops up to the wanted level's count.
+  for (const cop of cops) {
+    if (active >= wantCount) break;
+    if (!cop.active) { placeCopNear(cop, px, pz, rng); active++; }
   }
-  if (wanted === 0) {
-    // heat gone: police peel off and despawn at distance
-    for (const c of police.cars) { c.speed = 14; c.heading += dt * 0.2; }
+  // Stand down extras when the heat drops.
+  let idx = 0;
+  for (const cop of cops) {
+    if (cop.active) { idx++; if (idx > wantCount) { cop.active = false; cop.mesh.visible = false; } }
   }
 
-  // --- police cars chase + ram ---
-  const px = player.pos.x, pz = player.pos.z;
-  for (const c of police.cars) {
-    const dx = px - c.pos.x, dz = pz - c.pos.z;
-    const dist = Math.hypot(dx, dz);
+  state.roadblock = wanted >= 4;
+  let closest = Infinity;
+  for (const cop of cops) {
+    if (!cop.active) continue;
+    const dx = px - cop.x, dz = pz - cop.z;
+    const d = Math.hypot(dx, dz);
+    closest = Math.min(closest, d);
     const targetHeading = Math.atan2(dx, dz);
-    let dh = targetHeading - c.heading;
+    let dh = targetHeading - cop.heading;
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
-    c.heading += THREE.MathUtils.clamp(dh, -2.4 * dt, 2.4 * dt);
-    const wantSpeed = wanted === 0 ? 14 : 13 + wanted * 2.2;
-    c.speed += (wantSpeed - c.speed) * Math.min(1, dt * 1.2);
-    c.pos.x += Math.sin(c.heading) * c.speed * dt;
-    c.pos.z += Math.cos(c.heading) * c.speed * dt;
-    c.mesh.rotation.y = c.heading;
-    // flashing light bar
-    if (c.mesh.userData.lightBar) {
-      const on = Math.floor(performance.now() / 180) % 2 === 0;
-      c.mesh.userData.lightBar[0].visible = on; c.mesh.userData.lightBar[1].visible = !on;
-    }
-    // ram: damage the player car / player
-    if (dist < 3.4 && wanted > 0) {
-      ctx.damagePlayer(6 * dt * 10, 'ram');
-      if (player.inCar) {
-        player.car.speed *= 0.92;
-        const push = 6 * dt;
-        player.car.pos.x += Math.sin(c.heading) * push;
-        player.car.pos.z += Math.cos(c.heading) * push;
-      }
-      if (Math.random() < dt * 2) audio.crash();
-    }
-  }
-  // despawn far police when heat is gone
-  police.cars = police.cars.filter(c => {
-    const d = Math.hypot(c.pos.x - px, c.pos.z - pz);
-    if (wanted === 0 && d > 90) { scene.remove(c.mesh); return false; }
-    if (d > 260) { scene.remove(c.mesh); return false; }
-    return true;
-  });
-
-  // --- foot cops: run at the player, shoot when close and player is on foot ---
-  for (const cop of police.foot) {
-    const dx = px - cop.pos.x, dz = pz - cop.pos.z;
-    const dist = Math.hypot(dx, dz);
-    cop.heading = Math.atan2(dx, dz);
-    if (dist > 2.2) {
-      cop.pos.x += Math.sin(cop.heading) * cop.speed * dt;
-      cop.pos.z += Math.cos(cop.heading) * cop.speed * dt;
-    }
+    cop.heading += clamp(dh, -2.2 * dt, 2.2 * dt);
+    const top = 24 + wanted * 1.6;
+    cop.speed = Math.min(cop.speed + 16 * dt, top);
+    cop.x += Math.sin(cop.heading) * cop.speed * dt;
+    cop.z += Math.cos(cop.heading) * cop.speed * dt;
+    cop.mesh.position.set(cop.x, 0, cop.z);
     cop.mesh.rotation.y = cop.heading;
-    cop.shootCd -= dt;
-    if (cop.shootCd <= 0 && dist < 26 && !player.inCar && wanted > 0) {
-      cop.shootCd = 2.4;
-      ctx.damagePlayer(7, 'shot');
-      audio.gunshot();
-      ctx.addFeed('A cop opened fire on you!');
+    // Ram: bump the player car and slow it (rate-limited, not every frame).
+    cop.ramT = Math.max(0, (cop.ramT || 0) - dt);
+    if (d < 4.2 && cop.ramT <= 0) {
+      cop.ramT = 0.6;
+      if (state.inCar && state.car) {
+        state.car.speed *= 0.82;
+        // Only shove a moving car: a stopped car should not be bulldozed.
+        if (Math.abs(state.car.speed) > 3) {
+          state.car.x += Math.sin(cop.heading) * 1.2;
+          state.car.z += Math.cos(cop.heading) * 1.2;
+        }
+        cop.speed *= 0.6;
+        state.bumped = true;
+      } else if (d < 2.2) {
+        state.bustedTimer = (state.bustedTimer || 0) + dt;
+      }
+    } else if (!state.inCar && d < 2.2) {
+      state.bustedTimer = (state.bustedTimer || 0) + dt;
     }
-    // arrest: cop touches the player on foot while wanted
-    if (dist < 1.6 && !player.inCar && wanted > 0) ctx.busted('arrested by Solano PD');
   }
-  police.foot = police.foot.filter(cop => {
-    const d = Math.hypot(cop.pos.x - px, cop.pos.z - pz);
-    if (wanted === 0 && d > 70) { scene.remove(cop.mesh); return false; }
-    return true;
+  state.closestCop = closest;
+  // Busted: a cop stays on top of the player on foot, or the player car is
+  // stopped cold with cops touching it.
+  if (state.wanted > 0) {
+    if (!state.inCar && closest < 2.4 && (state.bustedTimer || 0) > 1.2) state.mode = 'busted';
+    if (state.inCar && state.car && Math.abs(state.car.speed) < 0.5 && closest < 3.5) {
+      state.stoppedTimer = (state.stoppedTimer || 0) + dt;
+      if (state.stoppedTimer > 3) state.mode = 'busted';
+    } else {
+      state.stoppedTimer = 0;
+    }
+  } else {
+    state.bustedTimer = 0;
+    state.stoppedTimer = 0;
+  }
+  return closest;
+}
+
+// Foot cops: simple visual markers that wander near the player at 1-2 stars.
+export function spawnFootCops(scene) {
+  const cops = [];
+  const mat = new THREE.MeshLambertMaterial({ color: 0x1c2f4a });
+  for (let i = 0; i < 4; i++) {
+    const g = new THREE.Group();
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.7, 0.32), mat);
+    torso.position.y = 1.1; g.add(torso);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.4, 0.38), new THREE.MeshLambertMaterial({ color: 0xd9a066 }));
+    head.position.y = 1.7; g.add(head);
+    const hat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.42), new THREE.MeshLambertMaterial({ color: 0x101418 }));
+    hat.position.y = 1.92; g.add(hat);
+    g.visible = false;
+    scene.add(g);
+    cops.push({ mesh: g, x: 0, z: 0, heading: 0, active: false });
+  }
+  return cops;
+}
+
+export function updateFootCops(cops, dt, state, rng) {
+  const want = state.wanted >= 1 && state.wanted <= 2;
+  cops.forEach((cop, i) => {
+    cop.active = want;
+    cop.mesh.visible = want;
+    if (!want) return;
+    const px = state.player.x, pz = state.player.z;
+    if (Math.hypot(cop.x - px, cop.z - pz) > 40 || (cop.x === 0 && cop.z === 0)) {
+      cop.x = px + (rng() - 0.5) * 50;
+      cop.z = pz + (rng() - 0.5) * 50;
+    }
+    const d = Math.hypot(px - cop.x, pz - cop.z);
+    cop.heading = Math.atan2(px - cop.x, pz - cop.z);
+    const sp = d > 6 ? 3.2 : 0;
+    cop.x += Math.sin(cop.heading) * sp * dt;
+    cop.z += Math.cos(cop.heading) * sp * dt;
+    cop.mesh.position.set(cop.x, 0, cop.z);
+    cop.mesh.rotation.y = cop.heading;
+    if (d < 2.0) state.bustedTimer = (state.bustedTimer || 0) + dt * 1.5;
   });
-
-  // --- 5-star roadblocks: parked police cars across the road ahead ---
-  if (wanted >= 5 && police.roadblocks.length === 0) {
-    for (let i = -1; i <= 1; i++) {
-      const rb = createCar(scene, POLICE_MODEL, px + i * 3.2 + 20, pz + 24, Math.PI / 2, { isPolice: true });
-      rb.parked = true; rb.speed = 0;
-      police.roadblocks.push(rb);
-    }
-    ctx.addFeed('ROADBLOCK AHEAD — 5 stars! Turn around or smash through!');
-    audio.sirenBlip();
-  }
-  if (wanted < 5) {
-    for (const rb of police.roadblocks) scene.remove(rb.mesh);
-    police.roadblocks = [];
-  }
-
-  // --- losing the heat: far from all police + out of sight for a while ---
-  const nearest = Math.min(
-    ...police.cars.map(c => Math.hypot(c.pos.x - px, c.pos.z - pz)), 999);
-  if (wanted > 0 && nearest > 55) {
-    police.hiddenTimer += dt;
-    if (police.hiddenTimer > 6 + wanted * 2) {
-      state.wanted = Math.max(0, wanted - 1);
-      police.hiddenTimer = 0;
-      ctx.addFeed(state.wanted === 0 ? 'You lost them. Heat is off.' : `Wanted level dropped to ${state.wanted} star${state.wanted > 1 ? 's' : ''}.`);
-      audio.blip();
-    }
-  } else police.hiddenTimer = 0;
 }

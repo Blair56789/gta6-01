@@ -1,9 +1,12 @@
 // Port Solano — a 3D open-world crime game for make.fun's gta6-01 bounty.
-// Node 22, standard library only. This program hands the entry in: it copies
-// game/ and screenshots/ from beside this file to /output and writes
-// /output/dossier.json with buildDossier from the vendored make.fun library.
-// The game itself is plain static files under game/ (three.js vendored as
-// game/vendor/three.module.min.js, no network at runtime).
+// Rebuilt fresh in the 2026-11-18 session (recording 01a1ed2b): the game under
+// game/ was rewritten from scratch after the first build's sealed recording
+// was lost to a make.fun outage. Node 22, standard library only. This program
+// hands the entry in: it copies game/ and screenshots/ from beside this file
+// to /output and writes /output/dossier.json with buildDossier from the
+// vendored make.fun library. The game itself is plain static files under
+// game/ (three.js vendored as game/vendor/three.module.min.js, no network
+// at runtime).
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:

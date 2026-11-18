@@ -1,62 +1,71 @@
-// traffic.js — AI traffic cars that follow the road lanes, stop at nothing,
-// turn at intersections, and honk (visually: brake lights) when blocked.
+// Port Solano — traffic: civilian cars cruising the road grid on fixed lanes.
 import * as THREE from 'three';
-import { ROAD, nearestRoadPoint } from './city.js';
-import { createCar, randomCarModel } from './vehicles.js';
+import { CAR_MODELS, newCar } from './vehicles.js';
+import { WORLD } from './state.js';
+import { randRange, pick, clamp } from './util.js';
 
-export function createTraffic(scene, rng, count) {
+const TRAFFIC_COUNT = 16;
+
+export function spawnTraffic(scene, rng, city) {
   const cars = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < TRAFFIC_COUNT; i++) {
+    const model = pick(rng, CAR_MODELS);
     const horizontal = rng() < 0.5;
-    const road = ROAD[Math.floor(rng() * ROAD.length)];
-    const along = (rng() * 2 - 1) * 105;
-    const dir = rng() < 0.5 ? 1 : -1;
-    const x = horizontal ? along : road + (dir > 0 ? 3 : -3);
-    const z = horizontal ? road + (dir > 0 ? 3 : -3) : along;
-    const heading = horizontal ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI);
-    const car = createCar(scene, randomCarModel(rng), x, z, heading);
-    car.speed = 9 + rng() * 4;
-    car.horizontal = horizontal; car.dir = dir; car.lane = road;
+    const lane = (Math.floor(rng() * 11) - 5) * WORLD.block;
+    const along = randRange(rng, -190, 190);
+    const heading = horizontal ? (rng() < 0.5 ? Math.PI / 2 : -Math.PI / 2) : (rng() < 0.5 ? 0 : Math.PI);
+    const offset = 3.5;
+    const x = horizontal ? along : lane + (heading === 0 ? offset : -offset);
+    const z = horizontal ? lane + (heading === Math.PI / 2 ? -offset : offset) : along;
+    const car = newCar(scene, model, x, z, heading, model.name === 'Palm Taxi' ? 'taxi' : 'sedan');
+    car.speed = randRange(rng, 9, 14);
+    car.horizontal = horizontal;
+    car.lane = lane;
+    car.ai = true;
     cars.push(car);
   }
   return cars;
 }
 
-function aheadBlocked(car, others, playerCar) {
-  const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-  const check = (p, r) => {
-    const dx = p.x - car.pos.x, dz = p.z - car.pos.z;
-    const along = dx * fx + dz * fz, side = Math.abs(dx * fz - dz * fx);
-    return along > 0 && along < 12 && side < 2.5;
-  };
-  for (const o of others) if (o !== car && check(o.pos)) return true;
-  if (playerCar && check(playerCar.pos)) return true;
-  return false;
+// Traffic follows its lane; at an intersection it sometimes turns.
+export function updateTraffic(cars, dt, rng, playerCar) {
+  for (const car of cars) {
+    if (car.stolen) continue;
+    // Slow down if the player car is right ahead.
+    let targetSpeed = car.cruise || 12;
+    if (playerCar) {
+      const dx = playerCar.x - car.x, dz = playerCar.z - car.z;
+      const d = Math.hypot(dx, dz);
+      const ahead = Math.sin(car.heading) * dx + Math.cos(car.heading) * dz;
+      if (d < 12 && ahead > 0) targetSpeed = 3;
+    }
+    car.speed += (targetSpeed - car.speed) * Math.min(1, dt * 1.2);
+    car.x += Math.sin(car.heading) * car.speed * dt;
+    car.z += Math.cos(car.heading) * car.speed * dt;
+    // Wrap around the map edge.
+    if (car.x > 205) car.x = -205;
+    if (car.x < -205) car.x = 205;
+    if (car.z > 205) car.z = -205;
+    if (car.z < -205) car.z = 205;
+    // Turn at a random intersection.
+    const nearX = Math.abs(car.x - Math.round(car.x / WORLD.block) * WORLD.block) < 1.2;
+    const nearZ = Math.abs(car.z - Math.round(car.z / WORLD.block) * WORLD.block) < 1.2;
+    if (nearX && nearZ && rng() < dt * 0.25) {
+      car.heading += (rng() < 0.5 ? 1 : -1) * Math.PI / 2;
+      car.horizontal = !car.horizontal;
+    }
+    car.mesh.position.set(car.x, 0, car.z);
+    car.mesh.rotation.y = car.heading;
+  }
 }
 
-export function updateTraffic(cars, playerCar, dt, rng) {
+// Nearest drivable traffic car to a point, for carjacking (F).
+export function nearestTrafficCar(cars, x, z, maxDist) {
+  let best = null, bestD = maxDist;
   for (const car of cars) {
-    if (car === playerCar) continue; // the player is driving this one now
-    // at an intersection, sometimes turn
-    const onX = ROAD.some(r => Math.abs(car.pos.x - r) < 1.2);
-    const onZ = ROAD.some(r => Math.abs(car.pos.z - r) < 1.2);
-    if (onX && onZ && rng() < dt * 0.25) {
-      car.horizontal = !car.horizontal;
-      car.dir = rng() < 0.5 ? 1 : -1;
-      car.heading = car.horizontal ? (car.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (car.dir > 0 ? 0 : Math.PI);
-    }
-    // snap back onto the lane line
-    const snap = nearestRoadPoint(car.pos.x, car.pos.z);
-    if (car.horizontal) car.pos.z += (snap.z - car.pos.z) * Math.min(1, dt * 3);
-    else car.pos.x += (snap.x - car.pos.x) * Math.min(1, dt * 3);
-    const target = aheadBlocked(car, cars, playerCar) ? 0 : 7 + (car.cruise || 0);
-    if (!car.cruise) car.cruise = 4 + rng() * 3;
-    car.speed += ((aheadBlocked(car, cars, playerCar) ? 0 : car.cruise + 5) - car.speed) * Math.min(1, dt * 1.5);
-    car.pos.x += Math.sin(car.heading) * car.speed * dt;
-    car.pos.z += Math.cos(car.heading) * car.speed * dt;
-    car.mesh.rotation.y = car.heading;
-    // wrap around the city edge
-    if (car.pos.x > 118) car.pos.x = -118; if (car.pos.x < -118) car.pos.x = 118;
-    if (car.pos.z > 118) car.pos.z = -118; if (car.pos.z < -118) car.pos.z = 118;
+    if (car.stolen) continue;
+    const d = Math.hypot(car.x - x, car.z - z);
+    if (d < bestD) { bestD = d; best = car; }
   }
+  return best;
 }

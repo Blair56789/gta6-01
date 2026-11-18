@@ -1,6 +1,8 @@
 // Port Solano — a tiny static server for game/ (Node 22, standard library
 // only), so the entry can be played locally without a build step:
 // `node serve.ts` serves game/ on http://localhost:8080.
+// Rebuilt session note (2026-11-18): the game it serves was rewritten fresh
+// in this session; the server itself is unchanged apart from this header.
 // It sends the MIME types a browser game needs, refuses any path outside
 // game/, and otherwise does nothing clever: a development convenience, not
 // a web server for the internet.

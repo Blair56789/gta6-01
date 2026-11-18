@@ -1,79 +1,72 @@
-// minimap.js — top-down 2D minimap: roads, sea, player arrow, gold mission
-// marker, red/blue police, white traffic, green safehouse, shop icons.
-import { ROAD, BOUND } from './city.js';
+// Port Solano — the minimap: a top-down canvas of roads, shops, the player,
+// traffic, police, pedestrians and the gold mission marker.
+import { WORLD } from './state.js';
 
-function toMap(x, z, size) {
-  const s = size / (BOUND * 2 + 40);
-  return [size / 2 + x * s, size / 2 + z * s];
-}
-
-export function drawMinimap(canvas, ctx) {
-  const g = canvas.getContext('2d');
+export function drawMinimap(canvas, state, game) {
+  const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  g.clearRect(0, 0, W, H);
-  // base
-  g.fillStyle = '#0e2a3d'; g.fillRect(0, 0, W, H);
-  // sea (east edge)
-  const [seaX] = toMap(BOUND, 0, W);
-  g.fillStyle = '#1d6a94'; g.fillRect(seaX, 0, W - seaX, H);
-  g.fillStyle = '#e8d49a';
-  const [sandX] = toMap(BOUND - 6, 0, W);
-  g.fillRect(sandX, 0, seaX - sandX, H);
-  // roads
-  g.strokeStyle = '#5a636e'; g.lineWidth = 5; g.lineCap = 'round';
-  for (const r of ROAD) {
-    const [x1, y1] = toMap(r, -BOUND, W), [x2, y2] = toMap(r, BOUND, W);
-    g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
-    const [x3, y3] = toMap(-BOUND, r, W), [x4, y4] = toMap(BOUND, r, W);
-    g.beginPath(); g.moveTo(x3, y3); g.lineTo(x4, y4); g.stroke();
+  const scale = W / (WORLD.half * 2 + 40);
+  const toX = (x) => (x + WORLD.half + 20) * scale;
+  const toZ = (z) => (z + WORLD.half + 20) * scale;
+  ctx.fillStyle = '#0d2036';
+  ctx.fillRect(0, 0, W, H);
+  // Ocean + beach on the east.
+  ctx.fillStyle = '#1e6f9e';
+  ctx.fillRect(toX(WORLD.oceanX), 0, W - toX(WORLD.oceanX), H);
+  ctx.fillStyle = '#e8d29a';
+  ctx.fillRect(toX(WORLD.beachX), 0, toX(WORLD.oceanX) - toX(WORLD.beachX), H);
+  // Roads.
+  ctx.strokeStyle = '#3a4550';
+  ctx.lineWidth = 5;
+  for (let i = -5; i <= 5; i++) {
+    const c = i * WORLD.block;
+    ctx.beginPath(); ctx.moveTo(toX(-220), toZ(c)); ctx.lineTo(toX(220), toZ(c)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(toX(c), toZ(-220)); ctx.lineTo(toX(c), toZ(220)); ctx.stroke();
   }
-  // buildings hint (small blocks)
-  g.fillStyle = 'rgba(210,190,150,0.5)';
-  for (let i = 0; i < ROAD.length - 1; i++) for (let j = 0; j < ROAD.length - 1; j++) {
-    const [x, y] = toMap(ROAD[i] + 23, ROAD[j] + 23, W);
-    g.fillRect(x - 7, y - 7, 14, 14);
+  // Buildings as blocks.
+  ctx.fillStyle = '#5a6e8a';
+  for (const b of game.city.buildings) {
+    const w = 12 * scale, h = 12 * scale;
+    ctx.fillRect(toX(b.position.x) - w / 2, toZ(b.position.z) - h / 2, w, h);
   }
-  const dot = (x, z, color, r) => {
-    const [mx, my] = toMap(x, z, W);
-    g.fillStyle = color; g.beginPath(); g.arc(mx, my, r, 0, Math.PI * 2); g.fill();
-  };
-  const ring = (x, z, color, r) => {
-    const [mx, my] = toMap(x, z, W);
-    g.strokeStyle = color; g.lineWidth = 2; g.beginPath(); g.arc(mx, my, r, 0, Math.PI * 2); g.stroke();
-  };
-  // landmarks: safehouse green, garage/chop shop yellow
-  const lm = ctx.landmarks;
-  dot(lm.safehouse.x, lm.safehouse.z, '#2fd673', 5);
-  dot(lm.garage.x, lm.garage.z, '#ffd25a', 4);
-  dot(lm.chopShop.x, lm.chopShop.z, '#ff9d7d', 4);
-  dot(lm.bank.x, lm.bank.z, '#ffe9a8', 4);
-  // traffic white
-  for (const c of ctx.traffic) dot(c.pos.x, c.pos.z, '#ffffff', 2);
-  // tail target / comet: purple
-  if (ctx.tailTarget) dot(ctx.tailTarget.pos.x, ctx.tailTarget.pos.z, '#c07dff', 4);
-  if (ctx.cometCar) dot(ctx.cometCar.pos.x, ctx.cometCar.pos.z, '#ffd25a', 4);
-  // police: red cars, blue foot
-  for (const c of ctx.police.cars) dot(c.pos.x, c.pos.z, '#ff3a3a', 3.5);
-  for (const c of ctx.police.foot) dot(c.pos.x, c.pos.z, '#3aa7ff', 3);
-  // mission marker: pulsing gold ring
-  const target = ctx.missionTargetPos ? ctx.missionTargetPos() : null;
-  if (target) {
-    const pulse = 6 + Math.sin(performance.now() / 250) * 2;
-    ring(target.x, target.z, '#ffd25a', pulse);
-    dot(target.x, target.z, '#ffd25a', 4);
+  // Shops.
+  ctx.fillStyle = '#ffd25a';
+  for (const s of game.city.shops) {
+    ctx.beginPath(); ctx.arc(toX(s.x), toZ(s.z), 3.5, 0, Math.PI * 2); ctx.fill();
   }
-  // player arrow (rotates with heading)
-  const [px, py] = toMap(ctx.player.pos.x, ctx.player.pos.z, W);
-  g.save();
-  g.translate(px, py);
-  g.rotate(-ctx.player.heading);
-  g.fillStyle = '#ffffff';
-  g.strokeStyle = '#10202e'; g.lineWidth = 1.5;
-  g.beginPath(); g.moveTo(0, -8); g.lineTo(5, 6); g.lineTo(-5, 6); g.closePath();
-  g.fill(); g.stroke();
-  g.restore();
-  // north tick + label
-  g.fillStyle = '#9fd8ff'; g.font = 'bold 11px Verdana, sans-serif'; g.textAlign = 'left';
-  g.fillText('N', 6, 14);
-  g.fillText('PORT SOLANO', 6, H - 8);
+  // Mission marker (gold, pulsing).
+  if (state.objective) {
+    const pulse = 5 + Math.sin(state.time * 4) * 2;
+    ctx.fillStyle = '#ffd25a';
+    ctx.beginPath(); ctx.arc(toX(state.objective.x), toZ(state.objective.z), pulse, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(toX(state.objective.x), toZ(state.objective.z), pulse + 3, 0, Math.PI * 2); ctx.stroke();
+  }
+  // Pedestrians (tiny grey dots).
+  ctx.fillStyle = '#9fb2c8';
+  for (const p of game.peds) ctx.fillRect(toX(p.x) - 1, toZ(p.z) - 1, 2, 2);
+  // Traffic (white dots).
+  ctx.fillStyle = '#ffffff';
+  for (const c of game.traffic) ctx.fillRect(toX(c.x) - 1.5, toZ(c.z) - 1.5, 3, 3);
+  // Police (blue/red flashing dots).
+  for (const cop of game.cops) {
+    if (!cop.active) continue;
+    ctx.fillStyle = Math.floor(state.time * 4) % 2 ? '#ff2222' : '#2244ff';
+    ctx.beginPath(); ctx.arc(toX(cop.x), toZ(cop.z), 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+  // Player (white triangle, pointing along heading).
+  const px = state.inCar && state.car ? state.car.x : state.player.x;
+  const pz = state.inCar && state.car ? state.car.z : state.player.z;
+  const heading = state.inCar && state.car ? state.car.heading : state.player.heading;
+  ctx.save();
+  ctx.translate(toX(px), toZ(pz));
+  ctx.rotate(-heading + Math.PI);
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#000';
+  ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(5, 5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+  // North arrow.
+  ctx.fillStyle = '#cfe2f5';
+  ctx.font = 'bold 11px Verdana';
+  ctx.fillText('N', 6, 14);
 }

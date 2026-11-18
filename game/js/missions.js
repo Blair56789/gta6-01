@@ -1,201 +1,236 @@
-// missions.js — the six-job story chain for Rook and fixer Mara Voss.
-// Each mission is stages with a waypoint, a radius and an optional timer.
-// Completing a mission pays cash + Respect and advances the clock one day.
-import * as THREE from 'three';
+// Port Solano — "The Meridian Job": the six-mission story chain.
+// Each mission sets objectives on the state; main.js renders the marker and
+// pays out on completion. Missions 3–6 are original to this game.
+import { fmtMoney } from './util.js';
 
-export const MISSION_DEFS = [
-  { name: 'GETAWAY', short: 'Lose the cops, reach the gold marker.',
-    intro: 'Mara: "Cops are on you already, Rook. Lose them and get to the gold marker. Drive!"',
-    reward: 800, respect: 400,
-    stages: [{ text: 'Reach the gold marker', target: [46, 92], radius: 8, timer: 150 }] },
-  { name: 'COURIER RUN', short: 'Deliver the package — two drops, on the clock.',
-    intro: 'Mara: "Two drops, one package, no questions. First the north docks, then the pier. Go."',
-    reward: 1200, respect: 500,
-    stages: [
-      { text: 'Deliver to the north docks', target: [0, -92], radius: 8, timer: 180 },
-      { text: 'Deliver to the pier', target: [112, 0], radius: 8, timer: 180 },
-    ] },
-  { name: 'STEAL THE COMET', short: 'Steal the gold Comet GT and bring it to the Chop Shop.',
-    intro: 'Mara: "A gold Comet GT is parked by the pier. Take it — press E — and bring it to the Chop Shop. No scratches."',
-    reward: 1500, respect: 700,
-    stages: [
-      { text: 'Reach the gold Comet GT', target: [100, 46], radius: 6, timer: 240 },
-      { text: 'Steal the Comet (press E by the car)', target: [100, 46], radius: 6, timer: 240, needCar: 'comet' },
-      { text: 'Deliver the Comet to the Chop Shop', target: [69, 69], radius: 9, timer: 240, needCar: 'comet' },
-    ] },
-  { name: 'TAIL THE COURIER', short: 'Follow the courier — close enough to see, far enough not to be seen.',
-    intro: 'Mara: "A courier is carrying the Meridian vault codes. Tail him. Stay 10–45m back. Get spotted and he burns the codes."',
-    reward: 1800, respect: 800,
-    stages: [{ text: 'Tail the courier — stay in range', target: null, radius: 0, timer: 240, tail: true }] },
-  { name: 'DEFEND THE STASH', short: 'Hold the safehouse. Drop all 8 raiders.',
-    intro: 'Mara: "Rivals found the stash house. Hold the safehouse and drop all 8 raiders. Punch with F, shoot with click."',
-    reward: 2500, respect: 1000,
-    stages: [{ text: 'Defend the safehouse — raiders left: 8', target: [-69, -69], radius: 20, timer: 200, defend: true }] },
-  { name: 'THE MERIDIAN JOB', short: 'The final heist. Hit the bank, grab the vault, escape to the pier.',
-    intro: 'Mara: "This is it, Rook. The Meridian Bank vault. Grab the cash, lose a 4-star manhunt, and meet me at the pier. $50,000 if we walk away."',
-    reward: 50000, respect: 5000,
-    stages: [
-      { text: 'Reach Meridian Bank', target: [23, -69], radius: 9, timer: 300 },
-      { text: 'Hold the vault — stay in the gold zone', target: [23, -69], radius: 9, timer: 300, hold: 10 },
-      { text: 'Escape to the pier with the cash', target: [112, 0], radius: 9, timer: 300, wanted: 4 },
-    ] },
+export const MISSIONS = [
+  {
+    name: 'GETAWAY',
+    briefing: 'Mara Voss: "The crew hit the marina vault. Cops are already on us — lose them and reach the gold marker."',
+    payout: 800,
+    timer: 180,
+    setup(state, api) {
+      api.setWanted(3);
+      api.setMarker(140, 120, 'Safe house — reach the gold marker');
+      state.objective = { x: 140, z: 120, label: 'Reach the gold marker' };
+    },
+    tick(state, api) {
+      if (Math.hypot(state.player.x - 140, state.player.z - 120) < 9) return 'done';
+      return null;
+    },
+  },
+  {
+    name: 'COURIER RUN',
+    briefing: 'Mara Voss: "Three parcels, three drops, no questions. Drive fast, drive clean."',
+    payout: 1200,
+    timer: 240,
+    setup(state, api) {
+      api.setWanted(1);
+      state.objectives = [
+        { x: -120, z: 120, label: 'Drop 1/3 — Harbor Steps' },
+        { x: 120, z: -120, label: 'Drop 2/3 — North Gate' },
+        { x: -80, z: -80, label: 'Drop 3/3 — Meridian Plaza' },
+      ];
+      state.missionStage = 0;
+      const o = state.objectives[0];
+      api.setMarker(o.x, o.z, o.label);
+      state.objective = o;
+    },
+    tick(state, api) {
+      const o = state.objectives[state.missionStage];
+      if (!o) return 'done';
+      const px = state.inCar && state.car ? state.car.x : state.player.x;
+      const pz = state.inCar && state.car ? state.car.z : state.player.z;
+      if (Math.hypot(px - o.x, pz - o.z) < 9) {
+        api.feed('Parcel delivered — ' + fmtMoney(400));
+        api.addCash(400);
+        state.missionStage++;
+        const next = state.objectives[state.missionStage];
+        if (!next) return 'done';
+        api.setMarker(next.x, next.z, next.label);
+        state.objective = next;
+        api.blip();
+      }
+      return null;
+    },
+  },
+  {
+    name: 'TAXI SHIFT',
+    briefing: 'Mara Voss: "Lay low. Drive the cab, take three fares, pocket the cash. Passengers are waiting at the blue markers."',
+    payout: 900,
+    timer: 300,
+    setup(state, api) {
+      api.setWanted(0);
+      state.objectives = [
+        { x: 80, z: 40, label: 'Passenger 1/3 — Palm Row' },
+        { x: -160, z: 80, label: 'Passenger 2/3 — West End' },
+        { x: 120, z: -80, label: 'Passenger 3/3 — Marina' },
+      ];
+      state.missionStage = 0;
+      state.taxiFare = 0;
+      const o = state.objectives[0];
+      api.setMarker(o.x, o.z, o.label, 0x3fa7ff);
+      state.objective = o;
+    },
+    tick(state, api) {
+      const o = state.objectives[state.missionStage];
+      if (!o) return 'done';
+      const px = state.inCar && state.car ? state.car.x : state.player.x;
+      const pz = state.inCar && state.car ? state.car.z : state.player.z;
+      if (Math.hypot(px - o.x, pz - o.z) < 8) {
+        const fare = 180 + Math.floor(Math.random() * 120);
+        state.taxiFare += fare;
+        api.feed('Fare collected — ' + fmtMoney(fare));
+        api.addCash(fare);
+        state.missionStage++;
+        const next = state.objectives[state.missionStage];
+        if (!next) return 'done';
+        api.setMarker(next.x, next.z, next.label, 0x3fa7ff);
+        state.objective = next;
+        api.blip();
+      }
+      return null;
+    },
+  },
+  {
+    name: 'CHOP SHOP',
+    briefing: 'Mara Voss: "A gold Comet GT is parked uptown. Steal it — F next to it on foot — and deliver it to the Chop Shop in one piece."',
+    payout: 2500,
+    timer: 300,
+    setup(state, api) {
+      api.setWanted(1);
+      const car = api.spawnChopCar();
+      state.chopTarget = car;
+      api.setMarker(car.x, car.z, 'Steal the gold Comet GT', 0xffd25a);
+      state.objective = { x: car.x, z: car.z, label: 'Steal the gold Comet GT' };
+      state.missionStage = 0;
+    },
+    tick(state, api) {
+      if (state.missionStage === 0) {
+        if (state.car && state.car.isChopCar) {
+          state.missionStage = 1;
+          api.setMarker(-120, -20, 'Deliver the Comet to the Chop Shop');
+          state.objective = { x: -120, z: -20, label: 'Deliver the Comet to the Chop Shop' };
+          api.feed('Got it. Now get it to the Chop Shop — no dents, no cops.');
+        }
+        return null;
+      }
+      const px = state.car ? state.car.x : state.player.x;
+      const pz = state.car ? state.car.z : state.player.z;
+      if (state.car && state.car.isChopCar && Math.hypot(px + 120, pz + 20) < 10) return 'done';
+      if (!state.car || !state.car.isChopCar) {
+        state.objective = { x: -120, z: -20, label: 'Get back in the gold Comet!' };
+      }
+      return null;
+    },
+  },
+  {
+    name: 'HEIST SETUP',
+    briefing: 'Mara Voss: "The Meridian Job needs three crates: drills, masks, getaway plates. Grab them all — and stay quiet."',
+    payout: 3000,
+    timer: 300,
+    setup(state, api) {
+      api.setWanted(0);
+      state.objectives = [
+        { x: -160, z: -140, label: 'Crate 1/3 — Drills, old depot' },
+        { x: 160, z: 80, label: 'Crate 2/3 — Masks, marina lockup' },
+        { x: 40, z: 160, label: 'Crate 3/3 — Plates, south yard' },
+      ];
+      state.missionStage = 0;
+      state.crateCount = 0;
+      const o = state.objectives[0];
+      api.setMarker(o.x, o.z, o.label, 0x7be495);
+      state.objective = o;
+      api.spawnCrates(state.objectives);
+    },
+    tick(state, api) {
+      const o = state.objectives[state.missionStage];
+      if (!o) return 'done';
+      const px = state.player.x, pz = state.player.z;
+      if (Math.hypot(px - o.x, pz - o.z) < 6) {
+        state.crateCount++;
+        api.feed('Crate secured (' + state.crateCount + '/3)');
+        api.collectCrate(state.missionStage);
+        state.missionStage++;
+        const next = state.objectives[state.missionStage];
+        if (!next) return 'done';
+        api.setMarker(next.x, next.z, next.label, 0x7be495);
+        state.objective = next;
+        api.blip();
+      }
+      return null;
+    },
+  },
+  {
+    name: 'THE MERIDIAN JOB',
+    briefing: 'Mara Voss: "This is it. Hit the Meridian Tower, grab the vault case, then run for the beach. The whole crew is counting on you, Rook."',
+    payout: 50000,
+    timer: 360,
+    setup(state, api) {
+      api.setWanted(2);
+      api.setMarker(-60, -140, 'Enter the Meridian Tower', 0xffd25a);
+      state.objective = { x: -60, z: -140, label: 'Reach the Meridian Tower' };
+      state.missionStage = 0;
+    },
+    tick(state, api) {
+      if (state.missionStage === 0) {
+        if (Math.hypot(state.player.x + 60, state.player.z + 140) < 12) {
+          state.missionStage = 1;
+          api.setWanted(5);
+          api.feed('Vault case grabbed! FIVE STARS — run for the beach!');
+          api.setMarker(180, 0, 'Escape to the beach — the boat is waiting', 0x7be495);
+          state.objective = { x: 180, z: 0, label: 'Escape to the beach' };
+        }
+        return null;
+      }
+      const px = state.inCar && state.car ? state.car.x : state.player.x;
+      const pz = state.inCar && state.car ? state.car.z : state.player.z;
+      if (Math.hypot(px - 180, pz - 0) < 10) return 'done';
+      return null;
+    },
+  },
 ];
 
-export function rankFor(respect) {
-  if (respect >= 8000) return 'Kingpin';
-  if (respect >= 4000) return 'Respected';
-  if (respect >= 1500) return 'Connected';
-  return 'Street';
+export function startMission(state, api, index) {
+  state.missionIndex = index;
+  state.missionStage = 0;
+  state.missionTimer = MISSIONS[index].timer;
+  state.missionActive = true;
+  state.objectives = [];
+  state.objective = null;
+  MISSIONS[index].setup(state, api);
+  api.feed('MISSION ' + (index + 1) + '/6: ' + MISSIONS[index].name + ' — ' + MISSIONS[index].briefing);
 }
 
-export function startMission(ctx, index) {
-  const def = MISSION_DEFS[index];
-  ctx.mission = { index, stage: 0, timer: def.stages[0].timer || 0, holdLeft: 0,
-    tailTime: 0, spawned: false, text: def.stages[0].text };
-  ctx.addFeed(`MISSION ${index + 1}/6: ${def.name} — ${def.short}`);
-  ctx.banner(def.name, def.short);
-  ctx.audio.blip();
-  if (index === 0 && ctx.state.wanted < 1) ctx.raiseWanted(1, 'spotted fleeing the scene');
-  if (index === 5) ctx.state.wanted = Math.max(ctx.state.wanted, 0);
-  if (index === 3) spawnTailTarget(ctx);
-  if (index === 4) ctx.combatSpawn(def);
-}
-
-function spawnTailTarget(ctx) {
-  const { scene, rng } = ctx;
-  const { createCar } = ctx.vehicleApi;
-  const car = createCar(scene, { name: 'Courier Van', color: 0x8a8a8a, top: 15, grip: 1 }, -92, 46, Math.PI / 2);
-  car.speed = 8; car.isTailTarget = true;
-  car.waypoints = [[-92, 46], [46, 46], [46, -46], [-46, -46], [-46, 92], [92, 92], [92, -92], [-92, -92]];
-  car.wp = 0;
-  ctx.tailTarget = car;
-}
-
-export function missionTargetPos(ctx) {
-  const m = ctx.mission;
-  if (!m) return null;
-  const def = MISSION_DEFS[m.index];
-  const st = def.stages[m.stage];
-  if (st.tail && ctx.tailTarget) return new THREE.Vector3(ctx.tailTarget.pos.x, 0, ctx.tailTarget.pos.z);
-  if (!st.target) return null;
-  return new THREE.Vector3(st.target[0], 0, st.target[1]);
-}
-
-export function missionProgressText(ctx) {
-  const m = ctx.mission;
-  if (!m) return 'Free roam — press R to restart the current mission';
-  const def = MISSION_DEFS[m.index];
-  const st = def.stages[m.stage];
-  const t = missionTargetPos(ctx);
-  const d = t ? Math.round(Math.hypot(t.x - ctx.player.pos.x, t.z - ctx.player.pos.z)) : 0;
-  let extra = ` — ${d}m`;
-  if (st.tail) extra = ` — in range ${Math.round(m.tailTime)}s / 60s`;
-  if (st.hold) extra = ` — hold ${Math.ceil(m.holdLeft)}s`;
-  if (st.defend) extra = ` — raiders left: ${ctx.combat.enemies.length}`;
-  const timer = m.timer > 0 ? ` ⏱ ${Math.ceil(m.timer)}s` : '';
-  return `${st.text}${extra}${timer}`;
-}
-
-function advanceStage(ctx) {
-  const m = ctx.mission;
-  const def = MISSION_DEFS[m.index];
-  m.stage += 1;
-  if (m.stage >= def.stages.length) { completeMission(ctx); return; }
-  const st = def.stages[m.stage];
-  m.timer = st.timer || 0; m.holdLeft = st.hold || 0; m.text = st.text;
-  ctx.addFeed(`Next: ${st.text}`);
-  ctx.audio.blip();
-  if (m.index === 5 && m.stage === 2) ctx.raiseWanted(4, 'tripped the Meridian Bank alarm');
-}
-
-export function completeMission(ctx) {
-  const m = ctx.mission;
-  const def = MISSION_DEFS[m.index];
-  ctx.state.cash += def.reward;
-  ctx.state.respect += def.respect;
-  ctx.state.missionsDone += 1;
-  ctx.audio.missionDone(); ctx.audio.cash();
-  ctx.addFeed(`MISSION COMPLETE: ${def.name} — +$${def.reward.toLocaleString()} +${def.respect} Respect`);
-  if (ctx.tailTarget) { ctx.scene.remove(ctx.tailTarget.mesh); ctx.tailTarget = null; }
-  ctx.combatClear();
-  ctx.state.day += 1;
-  ctx.state.timeMin = 8 * 60;
-  ctx.saveGame();
-  if (m.index === 5) { ctx.winGame(); return; }
-  ctx.showEndCard('MISSION COMPLETE',
-    `${def.name} done.\n+$${def.reward.toLocaleString()}  •  +${def.respect} Respect  •  Rank: ${rankFor(ctx.state.respect)}\nDay ${ctx.state.day} begins — ${6 - m.index - 1} job${6 - m.index - 1 === 1 ? '' : 's'} left before the Meridian Job.\nNext: ${MISSION_DEFS[m.index + 1].name} — ${MISSION_DEFS[m.index + 1].short}`);
-  ctx.mission = null;
-  ctx.pendingNextMission = m.index + 1;
-}
-
-export function failMission(ctx, reason) {
-  const m = ctx.mission;
-  ctx.audio.busted();
-  if (ctx.tailTarget) { ctx.scene.remove(ctx.tailTarget.mesh); ctx.tailTarget = null; }
-  ctx.combatClear();
-  ctx.showEndCard('MISSION FAILED', `${reason}\nMara is not happy. The job is still open — try again.`);
-  ctx.mission = null;
-  ctx.pendingRetryMission = m ? m.index : 0;
-}
-
-export function updateMission(ctx, dt) {
-  const m = ctx.mission;
-  if (!m) return;
-  const def = MISSION_DEFS[m.index];
-  const st = def.stages[m.stage];
-  // countdown
-  if (m.timer > 0) {
-    m.timer -= dt;
-    if (m.timer <= 0) { failMission(ctx, `Out of time on ${def.name}.`); return; }
-  }
-  const p = ctx.player.pos;
-  // tail mission: follow the courier van along its waypoints
-  if (st.tail && ctx.tailTarget) {
-    const t = ctx.tailTarget;
-    const wp = t.waypoints[t.wp];
-    const dx = wp[0] - t.pos.x, dz = wp[1] - t.pos.z;
-    const d = Math.hypot(dx, dz);
-    if (d < 4) t.wp = (t.wp + 1) % t.waypoints.length;
-    const targetHeading = Math.atan2(dx, dz);
-    let dh = targetHeading - t.heading;
-    while (dh > Math.PI) dh -= Math.PI * 2;
-    while (dh < -Math.PI) dh += Math.PI * 2;
-    t.heading += THREE.MathUtils.clamp(dh, -1.6 * dt, 1.6 * dt);
-    t.speed = 8;
-    t.pos.x += Math.sin(t.heading) * t.speed * dt;
-    t.pos.z += Math.cos(t.heading) * t.speed * dt;
-    t.mesh.rotation.y = t.heading;
-    const dist = Math.hypot(p.x - t.pos.x, p.z - t.pos.z);
-    if (dist < 8) { failMission(ctx, 'The courier spotted you — too close! He burned the codes.'); return; }
-    if (dist > 50) { m.tailTime = Math.max(0, m.tailTime - dt * 2); }
-    else { m.tailTime += dt; if (Math.floor(m.tailTime) !== Math.floor(m.tailTime - dt)) ctx.addFeed(`Tailing… ${Math.round(m.tailTime)}s / 60s`); }
-    if (m.tailTime >= 60) { completeMission(ctx); }
+export function completeMission(state, api) {
+  const m = MISSIONS[state.missionIndex];
+  state.missionDone[state.missionIndex] = true;
+  state.missionActive = false;
+  api.addCash(m.payout);
+  state.respect += 500 + state.missionIndex * 250;
+  api.feed('MISSION COMPLETE — ' + m.name + ' — +' + fmtMoney(m.payout));
+  api.missionDoneSound();
+  api.clearMarker();
+  if (state.missionIndex === 5) {
+    state.mode = 'won';
+    state.endReason = 'The Meridian Job is done. Rook takes the crew\'s $50,000 cut and sails out of Port Solano a legend.';
     return;
   }
-  // defend mission: all raiders down wins
-  if (st.defend) {
-    if (m.spawned && ctx.combat.enemies.length === 0) { completeMission(ctx); }
-    return;
-  }
-  // hold stage (vault): stay inside the zone
-  if (st.hold) {
-    const t = new THREE.Vector3(st.target[0], 0, st.target[1]);
-    const d = Math.hypot(p.x - t.x, p.z - t.z);
-    if (d < st.radius) {
-      m.holdLeft -= dt;
-      if (m.holdLeft <= 0) { ctx.addFeed('Vault cracked — $50,000 in the bag! RUN!'); advanceStage(ctx); }
-    } else m.holdLeft = st.hold;
-    return;
-  }
-  // plain reach-the-marker stage
-  const t = new THREE.Vector3(st.target[0], 0, st.target[1]);
-  const d = Math.hypot(p.x - t.x, p.z - t.z);
-  if (st.needCar === 'comet') {
-    const inComet = ctx.player.inCar && ctx.player.car && ctx.player.car.model.name === 'Comet GT';
-    if (m.stage === 1 && inComet) { advanceStage(ctx); return; }
-    if (m.stage === 2 && inComet && d < st.radius) { completeMission(ctx); return; }
-    if (d < st.radius && m.stage === 1) ctx.setPrompt('Press E to steal the Comet GT');
-    return;
-  }
-  if (d < st.radius) advanceStage(ctx);
+  const next = state.missionIndex + 1;
+  state.day = Math.min(7, state.day + 1);
+  state.clockMin = 8 * 60;
+  api.toast('Mission ' + (state.missionIndex + 1) + '/6 complete — Day ' + state.day + ' begins');
+  startMission(state, api, next);
+}
+
+export function failMission(state, api, reason) {
+  state.missionActive = false;
+  api.feed('MISSION FAILED — ' + reason);
+  api.failSound();
+  api.clearMarker();
+  // Restart the same mission after a short beat.
+  state.missionTimer = 0;
+  setTimeout(() => {
+    if (state.mode === 'play') startMission(state, api, state.missionIndex);
+  }, 1200);
 }

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -11,97 +11,109 @@
 </script>
 </head>
 <body>
-<div id="wrap">
-  <canvas id="scene"></canvas>
+<canvas id="scene"></canvas>
 
-  <!-- ============ HUD (visible while playing) ============ -->
-  <div id="hud" class="hidden">
-    <div id="hud-top">
-      <div id="hud-tl" class="panel">
-        <div class="bar-row"><span class="lbl">HEALTH</span><div class="bar"><div id="hp-fill" class="fill hp"></div></div><span id="hp-num">100</span></div>
-        <div class="bar-row"><span class="lbl">ARMOR</span><div class="bar"><div id="ar-fill" class="fill ar"></div></div><span id="ar-num">0</span></div>
-        <div class="bar-row"><span class="lbl">WEAPON</span><span id="weapon">Fists</span><span id="ammo"></span></div>
-        <div class="bar-row"><span class="lbl">CAR</span><span id="car-name">— on foot —</span></div>
-      </div>
-      <div id="hud-tc">
-        <div id="objective">WIN: Finish The Meridian Job (6/6) and take the $50,000 cut. LOSE: Busted or Day 7 ends first.</div>
-        <div id="mission-line">Mission 1/6: GETAWAY</div>
-        <div id="mission-progress">Reach the gold marker — 320m</div>
-      </div>
-      <div id="hud-tr" class="panel">
-        <div id="stars" class="stars">☆☆☆☆☆</div>
-        <div class="bar-row"><span class="lbl">CASH</span><span id="cash" class="money">$250</span></div>
-        <div class="bar-row"><span class="lbl">RESPECT</span><span id="respect">Street</span></div>
-        <div class="bar-row"><span class="lbl">DAY</span><span id="day-time">Day 1 — 08:00</span></div>
-      </div>
-    </div>
+<!-- ======== HUD ======== -->
+<div id="hud" class="hidden">
+  <div id="topbar">WIN: Finish The Meridian Job (6/6) and take the $50,000 cut. &nbsp;·&nbsp; LOSE: Busted or Day 7 ends first.</div>
 
-    <div id="tracker" class="panel">
-      <div id="tracker-title">MISSION TRACKER</div>
-      <ul id="tracker-steps"></ul>
-      <div id="gig-line">Side gig: none nearby</div>
-    </div>
+  <div id="stats" class="panel">
+    <div class="row"><span class="lbl">HEALTH</span><div class="bar"><div id="healthBar" class="fill health"></div></div><span id="healthNum" class="num">100</span></div>
+    <div class="row"><span class="lbl">ARMOR</span><div class="bar"><div id="armorBar" class="fill armor"></div></div><span id="armorNum" class="num">0</span></div>
+    <div class="row"><span class="lbl">WEAPON</span><span id="weaponName" class="val">Fists</span><span id="ammoNum" class="num">∞</span></div>
+    <div class="row"><span class="lbl">CAR</span><span id="carName" class="val">On foot</span></div>
+  </div>
 
+  <div id="rightbox" class="panel">
+    <div id="stars">☆☆☆☆☆</div>
+    <div class="row"><span class="lbl">CASH</span><span id="cashNum" class="val money">$250</span></div>
+    <div class="row"><span class="lbl">RESPECT</span><span id="respectNum" class="val">Rookie (0)</span></div>
+    <div class="row"><span class="lbl">DAY</span><span id="dayNum" class="val">Day 1 — 08:00</span></div>
+  </div>
+
+  <div id="missionbox" class="panel">
+    <div id="missionTitle">Mission 1/6: GETAWAY</div>
+    <div id="missionObj">Reach the gold marker</div>
+    <div id="missionMeta"><span id="markerDist">—</span> &nbsp; <span id="missionTimer">⏱ 180s</span></div>
+  </div>
+
+  <div id="tracker" class="panel">
+    <div class="thead">MISSION TRACKER — THE MERIDIAN JOB</div>
+    <div id="trackerList"></div>
+    <div id="sidegig" class="side">Side gig: none nearby</div>
+  </div>
+
+  <div id="minimapWrap" class="panel">
     <canvas id="minimap" width="220" height="220"></canvas>
-
-    <div id="feed"></div>
-
-    <div id="banner" class="hidden"></div>
-    <div id="prompt" class="hidden"></div>
-    <div id="speedo"><span id="speed-num">0</span><span class="unit">mph</span></div>
-
-    <div id="controls-bar">
-      <b>WASD / Arrows</b> move &amp; drive &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>E</b> enter / exit / steal car &nbsp;·&nbsp; <b>Space</b> handbrake &nbsp;·&nbsp; <b>F</b> punch &nbsp;·&nbsp; <b>Click</b> shoot &nbsp;·&nbsp; <b>Q</b> shop (near a shop) &nbsp;·&nbsp; <b>Esc</b> pause &nbsp;·&nbsp; <b>R</b> restart mission &nbsp;·&nbsp; <b>M</b> mute
-    </div>
-    <div id="crosshair" class="hidden">+</div>
+    <div class="mapcap">PORT SOLANO — NORTH UP</div>
   </div>
 
-  <!-- ============ START SCREEN ============ -->
-  <div id="menu" class="overlay">
-    <div class="menu-card">
-      <h1>PORT SOLANO</h1>
-      <p class="tagline">A sun-soaked coastal city. One driver. Six jobs. One last score.</p>
-      <p class="story">You are <b>Rook</b>, getaway driver for fixer <b>Mara Voss</b>. Work the six-job chain across Port Solano — getaways, deliveries, a stolen Comet, a tail, a shootout — and finish with <b>The Meridian Job</b>.</p>
-      <div class="winlose">
-        <p><b class="win">WIN:</b> Complete mission 6/6 — The Meridian Job — and take the crew's <b>$50,000</b> cut.</p>
-        <p><b class="lose">LOSE:</b> Get <b>BUSTED</b> (health hits 0 while wanted, or arrested) — or reach the end of <b>Day 7</b> with the final job undone.</p>
-      </div>
-      <div class="menu-btns">
-        <button id="btn-new">NEW GAME</button>
-        <button id="btn-continue">CONTINUE</button>
-      </div>
-      <div class="menu-controls">
-        <b>WASD / Arrows</b> move &amp; drive · <b>Shift</b> sprint · <b>E</b> enter / exit / steal car · <b>Space</b> handbrake · <b>F</b> punch · <b>Click</b> shoot · <b>Q</b> shop near a shop · <b>Esc</b> pause · <b>R</b> restart mission · <b>M</b> mute
-      </div>
-      <p class="fine">Original game. Fictional city, characters and story — nothing from any Rockstar game. Progress saves to this browser.</p>
-    </div>
-  </div>
+  <div id="feed"></div>
 
-  <!-- ============ PAUSE / SHOP ============ -->
-  <div id="pause" class="overlay hidden">
-    <div class="menu-card">
-      <h2>PAUSED</h2>
-      <p id="pause-sub">Day 1 — Mission 1/6: GETAWAY</p>
-      <div class="menu-btns">
-        <button id="btn-resume">RESUME</button>
-        <button id="btn-restart-mission">RESTART MISSION</button>
-        <button id="btn-quit-menu">SAVE &amp; QUIT TO MENU</button>
-      </div>
-      <h3>SHOP — Mara's Garage</h3>
-      <div id="shop-list"></div>
-      <p class="fine">Bribe drops 1 wanted star. Vest and car armor absorb damage. SMG holds 120 rounds.</p>
-    </div>
-  </div>
+  <div id="speedo"><span id="speedNum">0</span><span class="mph"> mph</span></div>
+  <div id="crosshair">+</div>
+  <div id="interact" class="hidden">Press <b>F</b> to steal car</div>
+  <div id="toast" class="hidden"></div>
 
-  <!-- ============ MISSION COMPLETE / END SCREENS ============ -->
-  <div id="endcard" class="overlay hidden">
-    <div class="menu-card">
-      <h2 id="end-title">MISSION COMPLETE</h2>
-      <p id="end-body"></p>
-      <div class="menu-btns"><button id="btn-end-continue">CONTINUE</button></div>
+  <div id="controlsbar">WASD / Arrows move &amp; drive &nbsp;·&nbsp; <b>Shift</b> sprint / boost &nbsp;·&nbsp; <b>E</b> enter / exit car &nbsp;·&nbsp; <b>Space</b> handbrake &nbsp;·&nbsp; <b>F</b> punch / steal / interact &nbsp;·&nbsp; <b>Click</b> shoot &nbsp;·&nbsp; <b>R</b> reload &nbsp;·&nbsp; <b>1/2/3</b> weapons &nbsp;·&nbsp; <b>Q</b> shop (near a shop) &nbsp;·&nbsp; <b>Esc</b> pause &nbsp;·&nbsp; <b>M</b> mute</div>
+</div>
+
+<!-- ======== START MENU ======== -->
+<div id="menu" class="overlay">
+  <div class="card">
+    <h1>PORT SOLANO</h1>
+    <p class="tagline">A sun-soaked coastal city. One driver. Six jobs. One last score.</p>
+    <p class="story">You are <b>Rook</b>, getaway driver for fixer <b>Mara Voss</b>. Work the six-job chain across Port Solano — getaways, deliveries, a stolen Comet, a tail, a shootout — and finish with <b>The Meridian Job</b>.</p>
+    <div class="winlose">
+      <p><span class="win">WIN:</span> Complete mission 6/6 — The Meridian Job — and take the crew's <b>$50,000</b> cut.</p>
+      <p><span class="lose">LOSE:</span> Get <b>BUSTED</b> (health hits 0 while wanted, or arrested) — or reach the end of <b>Day 7</b> with the final job undone.</p>
+    </div>
+    <div class="btnrow">
+      <button id="btnNew" class="btn">NEW GAME</button>
+      <button id="btnContinue" class="btn">CONTINUE</button>
+    </div>
+    <p class="controls"><b>WASD / Arrows</b> move &amp; drive · <b>Shift</b> sprint · <b>E</b> enter / exit / steal car · <b>Space</b> handbrake · <b>F</b> punch · <b>Click</b> shoot · <b>Q</b> shop near a shop · <b>Esc</b> pause · <b>R</b> restart mission · <b>M</b> mute</p>
+    <p class="fine">Original game. Fictional city, characters and story — nothing from any Rockstar game. Progress saves to this browser.</p>
+  </div>
+</div>
+
+<!-- ======== PAUSE ======== -->
+<div id="pause" class="overlay hidden">
+  <div class="card">
+    <h2>PAUSED</h2>
+    <p id="pauseInfo">Day 1 — 08:00 · Mission 1/6</p>
+    <div class="btnrow">
+      <button id="btnResume" class="btn">RESUME</button>
+      <button id="btnRestartMission" class="btn">RESTART MISSION</button>
+      <button id="btnSaveQuit" class="btn">SAVE &amp; MENU</button>
+    </div>
+    <p class="controls">WASD drive/walk · Shift boost · Space handbrake · E enter/exit · F steal/interact · Click shoot · R reload · 1/2/3 weapons · Esc resume</p>
+  </div>
+</div>
+
+<!-- ======== SHOP ======== -->
+<div id="shop" class="overlay hidden">
+  <div class="card shopcard">
+    <h2 id="shopTitle">SOLANO ARMS &amp; AUTO</h2>
+    <p id="shopCash">Cash: $250</p>
+    <div id="shopItems"></div>
+    <div class="btnrow"><button id="btnCloseShop" class="btn">CLOSE [Q]</button></div>
+    <p class="fine">Bribes lower your wanted level. Vests absorb damage. Upgrades make your car faster.</p>
+  </div>
+</div>
+
+<!-- ======== END STATES ======== -->
+<div id="endcard" class="overlay hidden">
+  <div class="card">
+    <h2 id="endTitle">BUSTED</h2>
+    <p id="endText"></p>
+    <div class="btnrow">
+      <button id="btnRetry" class="btn">RETRY MISSION</button>
+      <button id="btnEndMenu" class="btn">MAIN MENU</button>
     </div>
   </div>
 </div>
+
 <script type="module" src="./js/main.js"></script>
 </body>
 </html>
